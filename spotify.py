@@ -26,5 +26,5 @@ def func(input):
     else:
         print("try again")
 
-# print(search_song("ghungroo")['result'][0])
-func("ghungroo")
+print(search_song("ghungroo")['result'][0])
+# func("ghungroo")
