@@ -11,6 +11,7 @@ from swibots import (
         community,
         InlineMarkup,
         CallbackQueryEvent,
+        inline_markup,
 )
 import logging
 import re
@@ -27,23 +28,24 @@ app = BotApp(
              "your bot description").register_command(
         [
             RegisterCommand("echo", "Echoes the message", True),
-            RegisterCommand(["music"],
-                        "Search for a music", True),
+            RegisterCommand("music", "Search for a music", True),
+            RegisterCommand("video", "Search for a video", True)
         ]
 )
 
 async def download_song(url: str):
     if url is not None:
         yt = YouTube(url).streams.filter(progressive=True, file_extension='mp4').first().download()
-        return yt.title
+        return yt
     else:
         return -1
 
 async def convert_to_mp3(path: str):
     # Load the MP4 file
-    mp4_file = AudioSegment.from_file(path, format="mp4")
+    mp4_file = await AudioSegment.from_file(path, format="mp4")
     # Convert the MP4 file to MP3
     mp3_file = mp4_file.export(f"{path}.mp3", format="mp3")
+    return f"{path}.mp3"
 
 '''
 async def save_file(media: SwiMedia):
@@ -94,8 +96,8 @@ async def get_music(query: str):
     }
 
 
-async def show_results(search: str, message: Message):
-    musics = await get_music(search)
+async def show_results_music(search: str, message: Message):
+    musics = await get_music(search+" song")
     # musics = {'title': 'Ghungroo'}
     if not musics:
         await message.edit_text(f"I couldn't found any result for {search}!")
@@ -105,18 +107,32 @@ async def show_results(search: str, message: Message):
        [
             InlineKeyboardButton(
                 text=f"{musics.get('title')}",
-                callback_data=f"search#{musics.get('title')}#{musics.get('url')}",
+                callback_data=f"song_search#{musics.get('url')}",
             )
-        ]
-        # for music in musics
+        ],
     ]
-
-    # btn = [[InlineKeyboardButton(text="Ghungroo", callback_data="Search")]]
 
     await message.edit_text(f"Here is what i found", inline_markup=InlineMarkup(btn))
 
+async def show_results_video(search: str, message: Message):
+    videos = await get_music(search)
+    if not videos:
+        await message.edit_text(f"I couldn't found any result for {search}!")
+        return
+
+    btn = [
+            [
+                InlineKeyboardButton(
+                    text=f"{videos.get('title')}",
+                    callback_data=f"video_search#{videos.get('url')}",
+                    )
+                ],
+            ]
+        
+    await message.edit_text(f"Here is what i found", inline_markup=InlineMarkup(btn))
+
 @app.on_command(["music"])
-async def imdb_search(ctx: BotContext[CommandEvent]):
+async def music_search(ctx: BotContext[CommandEvent]):
     message = ctx.event.message
     params = ctx.event.params
     if params is None or len(params) == 0:
@@ -124,7 +140,18 @@ async def imdb_search(ctx: BotContext[CommandEvent]):
         return
 
     mymessage = await message.reply_text(f"Searching for {params}...")
-    await show_results(params, mymessage)
+    await show_results_music(params, mymessage)
+
+@app.on_command(["video"])
+async def video_search(ctx: BotContext[CommandEvent]):
+    message = ctx.event.message
+    params = ctx.event.params
+    if params is None or len(params) == 0:
+        await message.reply_text(f"Please enter a video name!\nType /{ctx.event.command} <video name>")
+        return
+
+    mymessage = await message.reply_text(f"Searching for {params}...")
+    await show_results_video(params, mymessage)
 
 
 @app.on_command("echo")
@@ -134,26 +161,47 @@ async def echo_handler(ctx: BotContext[CommandEvent]):
     m.message = f"Your message: {text}"
     await ctx.send_message(m)
 
-@app.on_callback_query(filters.regexp('^search'))
+@app.on_callback_query(filters.regexp('^song_search'))
 async def song_search_callback(ctx: BotContext[CallbackQueryEvent]):
-    i, song_name, url = ctx.event.callback_data.split("#")
+    i, url = ctx.event.callback_data.split("#")
     message: Message = ctx.event.message
     btn = [
             [
                 InlineKeyboardButton(
                     text = f"Download",
                     # url = url,
-                    callback_data=f"download#{url}",
+                    callback_data=f"download_music#{url}",
                     )
                 ],
             ]
     
     await message.edit_text(f"Downlad this song?", inline_markup=InlineMarkup(btn))
 
-@app.on_callback_query(filters.regexp('^download'))
-async def song_download_callback(ctx: BotContext[CallbackQueryEvent]):
+@app.on_callback_query(filters.regexp('^video_search'))
+async def video_search_callback(ctx: BotContext[CallbackQueryEvent]):
     i, url = ctx.event.callback_data.split("#")
-    path = download_song(url)
+    message: Message = ctx.event.message
+    btn = [
+            [
+                InlineKeyboardButton(
+                    text=f"Download",
+                    callback_data=f"download_video#{url}",
+                    )
+                ],
+            ]
+
+    await message.edit_text(f"Download this video?", inline_markup=InlineMarkup(btn))
+
+@app.on_callback_query(filters.regexp('^download_video'))
+async def video_download_callback(ctx: BotContext[CallbackQueryEvent]):
+    i, url = ctx.event.callback_data.split("#")
+    path = await download_song(url)
+    index = 0
+    for i in range(len(path)-1,-1,-1):
+        if path[i]=='/':
+            index = i+1
+            break
+    path = path[index:]
     message: Message = ctx.event.message
     await message.edit_text(f"Downloading")
     if path==-1:
@@ -169,6 +217,53 @@ async def song_download_callback(ctx: BotContext[CallbackQueryEvent]):
                 ],
             ]
     await message.edit_text(f"Downloaded, do you wanna save this file?", inline_markup=InlineMarkup(btn))
+
+@app.on_callback_query(filters.regexp("^download_music"))
+async def song_download_callback(ctx: BotContext[CallbackQueryEvent]):
+    i, url = ctx.event.callback_data.split("#")
+    path = await download_song(url)
+    index = 0
+    for i in range(len(path)-1,-1,-1):
+        if path[i]=='/':
+            index = i+1
+            break
+    path = path[index:]
+
+    message: Message = ctx.event.message
+    await message.edit_text(f"Downloading")
+    if path==-1:
+        await message.reply_text(f"Error occurred try again")
+        return
+    btn = [
+            [
+                InlineKeyboardButton(
+                    text=f"Save the file {path}",
+                    callback_data=f"save#'{path}",
+                    )
+                ],
+            ]
+    await message.edit_text(
+            f"Downloaded, do you wanna save this file?", inline_markup=InlineMarkup(btn)
+            )
+
+
+@app.on_callback_query((filters.regexp("^save")))
+async def download_message(ctx: BotContext[CallbackQueryEvent]):
+    i, path = ctx.event.callback_data.split("#")
+    btn = [
+            [
+                InlineKeyboardButton(
+                    text=f"Download file",
+                    url=path,
+                    )
+                ],
+            ]
+    message: Message = ctx.event.message
+    message.media_link = path
+    message.status = 7
+    message.caption = "File to download"
+    message.inline_markup = InlineMarkup(btn)
+    await message.send()
 
 app.run()
 
